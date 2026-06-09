@@ -1,0 +1,73 @@
+import { Link } from "wouter";
+import { XCircle, RotateCcw, Home } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Layout } from "@/components/layout";
+
+const REASON_LABELS: Record<string, string> = {
+  failed:          "Le paiement a été refusé.",
+  cancelled:       "Vous avez annulé le paiement.",
+  expired:         "La session de paiement a expiré.",
+  missing_ref:     "Référence de paiement manquante.",
+  not_found:       "Transaction introuvable.",
+  unknown:         "Une erreur inconnue s'est produite.",
+};
+
+export default function PaymentError() {
+  // useLocation() from wouter does NOT include the query string.
+  // Always use window.location.search to read query params.
+  const params = new URLSearchParams(
+    typeof window !== "undefined" ? window.location.search : ""
+  );
+  const reason  = params.get("reason") ?? "unknown";
+  const ref     = params.get("ref");
+
+  const message = REASON_LABELS[reason] ?? REASON_LABELS.unknown;
+
+  return (
+    <Layout>
+      <div className="min-h-[70vh] flex items-center justify-center px-4 py-16">
+        <div className="max-w-md w-full text-center space-y-6">
+          <div className="flex justify-center">
+            <div className="w-24 h-24 rounded-full bg-red-100 flex items-center justify-center">
+              <XCircle className="h-14 w-14 text-red-500" />
+            </div>
+          </div>
+
+          <div>
+            <h1 className="text-3xl font-extrabold text-gray-900 mb-2">Paiement échoué</h1>
+            <p className="text-muted-foreground">{message}</p>
+          </div>
+
+          {ref && (
+            <div className="bg-muted rounded-xl p-4 text-sm">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Référence</span>
+                <span className="font-mono text-xs">{ref}</span>
+              </div>
+            </div>
+          )}
+
+          <p className="text-sm text-muted-foreground">
+            Votre commande est enregistrée. Vous pouvez réessayer le paiement ou choisir
+            le paiement à la livraison.
+          </p>
+
+          <div className="flex flex-col sm:flex-row gap-3 justify-center">
+            <Button asChild size="lg" className="font-bold text-white">
+              <Link href="/checkout">
+                <RotateCcw className="h-4 w-4 mr-2" />
+                Réessayer
+              </Link>
+            </Button>
+            <Button asChild variant="outline" size="lg">
+              <Link href="/">
+                <Home className="h-4 w-4 mr-2" />
+                Retour à l'accueil
+              </Link>
+            </Button>
+          </div>
+        </div>
+      </div>
+    </Layout>
+  );
+}
