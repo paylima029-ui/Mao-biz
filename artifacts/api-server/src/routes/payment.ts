@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
 import { ordersTable, transactionsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, or, desc } from "drizzle-orm";
 import { logger } from "../lib/logger";
 import {
   createCharge,
@@ -30,6 +30,48 @@ function makeClientRef(orderId: number): string {
   return `MAO-${orderId}-${Date.now()}`;
 }
 
+/**
+ * Try to find a transaction using multiple strategies:
+ * 1. Exact clientReference match (our ref)
+ * 2. Diamanopay's own transactionId or chargeId (in case they overwrite ?ref=)
+ * 3. Extract orderId from MAO-{orderId}-{ts} pattern and find latest txn for that order
+ */
+async function findTransaction(ref: string) {
+  // 1. Exact clientReference
+  const [byRef] = await db
+    .select()
+    .from(transactionsTable)
+    .where(eq(transactionsTable.clientReference, ref));
+  if (byRef) return byRef;
+
+  // 2. Diamanopay's own transactionId or chargeId
+  const [byTxnId] = await db
+    .select()
+    .from(transactionsTable)
+    .where(
+      or(
+        eq(transactionsTable.transactionId, ref),
+        eq(transactionsTable.chargeId, ref)
+      )
+    );
+  if (byTxnId) return byTxnId;
+
+  // 3. Extract orderId from pattern MAO-{orderId}-{timestamp}
+  const match = ref.match(/^MAO-(\d+)-\d+$/);
+  if (match) {
+    const orderId = Number(match[1]);
+    const [byOrder] = await db
+      .select()
+      .from(transactionsTable)
+      .where(eq(transactionsTable.orderId, orderId))
+      .orderBy(desc(transactionsTable.createdAt))
+      .limit(1);
+    if (byOrder) return byOrder;
+  }
+
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // POST /api/payment/create
 // ---------------------------------------------------------------------------
@@ -51,7 +93,7 @@ router.post("/create", async (req, res) => {
     return res.status(400).json({ error: `Mode de paiement non supporté: ${order.paymentMethod}` });
   }
 
-  const base           = getBaseUrl();
+  const base            = getBaseUrl();
   const clientReference = makeClientRef(order.id);
 
   try {
@@ -71,7 +113,6 @@ router.post("/create", async (req, res) => {
       },
     });
 
-    // Persist transaction
     await db.insert(transactionsTable).values({
       transactionId:   charge.chargeId ?? null,
       chargeId:        charge.chargeId ?? null,
@@ -95,7 +136,6 @@ router.post("/create", async (req, res) => {
     const msg = err instanceof Error ? err.message : String(err);
     logger.error({ msg, orderId }, "Diamanopay createCharge échoué");
 
-    // Save failed transaction for traceability
     await db.insert(transactionsTable).values({
       clientReference,
       orderId:      order.id,
@@ -114,23 +154,29 @@ router.post("/create", async (req, res) => {
 
 // ---------------------------------------------------------------------------
 // GET /api/payment/callback  — Diamanopay redirects the user here
-// Diamanopay may redirect without any ?status param, or with various param
-// names/values depending on the provider. We treat the redirect as success
-// unless the status is explicitly a failure/cancel signal.
-// The webhook (POST) is the authoritative source for final status.
+//
+// Diamanopay may redirect BOTH the initiating browser (PC) AND the phone
+// used for payment. The phone redirect may use Diamanopay's own transaction
+// ID as the ?ref= value instead of our clientReference. We therefore try
+// multiple lookup strategies before giving up.
 // ---------------------------------------------------------------------------
 router.get("/callback", async (req, res) => {
-  const ref = req.query.ref as string | undefined;
-
-  // Log every query param Diamanopay sends so we can see exactly what arrives
+  // Log every query param Diamanopay sends so we can diagnose ref mismatches
   logger.info({ query: req.query }, "Diamanopay callback reçu");
 
-  if (!ref) return res.redirect("/payment-error?reason=missing_ref");
+  const ref = (req.query.ref as string | undefined)?.trim();
 
-  const [txn] = await db.select().from(transactionsTable)
-    .where(eq(transactionsTable.clientReference, ref));
+  if (!ref) {
+    return res.redirect("/payment-error?reason=missing_ref");
+  }
 
-  if (!txn) return res.redirect("/payment-error?reason=not_found");
+  const txn = await findTransaction(ref);
+
+  if (!txn) {
+    // Pass ref so the error page can still poll (webhook may confirm later)
+    logger.warn({ ref, query: req.query }, "Callback: transaction non trouvée");
+    return res.redirect(`/payment-error?ref=${encodeURIComponent(ref)}&reason=not_found`);
+  }
 
   // Collect all possible status indicators Diamanopay might send
   const rawStatus = (
@@ -142,17 +188,13 @@ router.get("/callback", async (req, res) => {
   ) as string;
   const upperStatus = rawStatus.toUpperCase();
 
-  // Only treat as explicit failure if Diamanopay says so clearly
   const FAILURE_STATUSES = ["FAILED", "FAILURE", "CANCELLED", "CANCELED", "EXPIRED", "ERROR", "REJECTED"];
   const isExplicitFailure = FAILURE_STATUSES.includes(upperStatus);
-
-  // If no status was sent, or it's a positive/unknown value → treat as success
-  // (Diamanopay often redirects to the URL only on success, relying on webhook for real confirmation)
   const newStatus = isExplicitFailure ? "failed" : "success";
 
   await db.update(transactionsTable)
     .set({ status: newStatus, updatedAt: new Date() })
-    .where(eq(transactionsTable.clientReference, ref));
+    .where(eq(transactionsTable.id, txn.id));
 
   if (txn.orderId) {
     await db.update(ordersTable)
@@ -160,12 +202,16 @@ router.get("/callback", async (req, res) => {
       .where(eq(ordersTable.id, txn.orderId));
   }
 
-  logger.info({ ref, rawStatus, upperStatus, newStatus }, "Diamanopay callback traité");
+  logger.info({ ref, rawStatus, upperStatus, newStatus, txnId: txn.id }, "Callback traité");
 
   if (isExplicitFailure) {
-    return res.redirect(`/payment-error?ref=${ref}&reason=${upperStatus.toLowerCase()}`);
+    return res.redirect(
+      `/payment-error?ref=${encodeURIComponent(txn.clientReference)}&reason=${upperStatus.toLowerCase()}`
+    );
   }
-  return res.redirect(`/payment-success?ref=${ref}&orderId=${txn.orderId ?? ""}`);
+  return res.redirect(
+    `/payment-success?ref=${encodeURIComponent(txn.clientReference)}&orderId=${txn.orderId ?? ""}`
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -184,10 +230,10 @@ router.post("/webhook", async (req, res) => {
   if (ref) {
     await db.update(transactionsTable)
       .set({
-        status:      newStatus,
+        status:        newStatus,
         transactionId: txnId ? String(txnId) : undefined,
-        webhookData: body,
-        updatedAt:   new Date(),
+        webhookData:   body,
+        updatedAt:     new Date(),
       })
       .where(eq(transactionsTable.clientReference, String(ref)));
 
@@ -200,32 +246,56 @@ router.post("/webhook", async (req, res) => {
         .where(eq(ordersTable.id, txn.orderId));
     }
     logger.info({ ref, newStatus }, "Transaction mise à jour via webhook");
+  } else if (txnId) {
+    // Fallback: update by Diamanopay transaction/charge ID
+    const [txn] = await db.select().from(transactionsTable)
+      .where(
+        or(
+          eq(transactionsTable.transactionId, String(txnId)),
+          eq(transactionsTable.chargeId, String(txnId))
+        )
+      );
+
+    if (txn) {
+      await db.update(transactionsTable)
+        .set({ status: newStatus, webhookData: body, updatedAt: new Date() })
+        .where(eq(transactionsTable.id, txn.id));
+
+      if (txn.orderId) {
+        await db.update(ordersTable)
+          .set({ status: success ? "confirmed" : newStatus })
+          .where(eq(ordersTable.id, txn.orderId));
+      }
+      logger.info({ txnId, newStatus }, "Transaction mise à jour via webhook (par txnId)");
+    }
   }
 
   return res.json({ received: true });
 });
 
 // ---------------------------------------------------------------------------
-// GET /api/payment/status/:transactionId
+// GET /api/payment/status/:ref
+// Uses the same multi-strategy lookup as the callback.
 // ---------------------------------------------------------------------------
-router.get("/status/:transactionId", async (req, res) => {
-  const { transactionId } = req.params;
+router.get("/status/:ref", async (req, res) => {
+  const { ref } = req.params;
 
-  // 1. Check local DB first
-  const [local] = await db.select().from(transactionsTable)
-    .where(eq(transactionsTable.clientReference, transactionId));
+  const local = await findTransaction(ref);
 
   if (!local) {
     return res.status(404).json({ error: "Transaction introuvable" });
   }
 
-  // 2. If pending, try to refresh from Diamanopay
+  // If still pending, try to refresh from Diamanopay
   if (local.status === "pending" && local.transactionId && DIAMANOPAY_CONFIGURED) {
     try {
       const remote = await getTransaction(local.transactionId);
-      const remoteStatus = remote.status === "SUCCESS" || remote.status === "PAID"
-        ? "success"
-        : remote.status === "FAILED" ? "failed" : local.status;
+      const remoteStatus =
+        remote.status === "SUCCESS" || remote.status === "PAID"
+          ? "success"
+          : remote.status === "FAILED"
+          ? "failed"
+          : local.status;
 
       if (remoteStatus !== local.status) {
         await db.update(transactionsTable)
@@ -240,7 +310,7 @@ router.get("/status/:transactionId", async (req, res) => {
         }
       }
     } catch (err) {
-      logger.warn({ err, transactionId }, "Impossible de rafraîchir depuis Diamanopay");
+      logger.warn({ err, ref }, "Impossible de rafraîchir depuis Diamanopay");
     }
   }
 
@@ -259,7 +329,7 @@ router.get("/status/:transactionId", async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// POST /api/payment/initiate  — backward compat alias (kept for old clients)
+// POST /api/payment/initiate  — backward compat alias
 // ---------------------------------------------------------------------------
 router.post("/initiate", async (req, res) => {
   req.body = req.body ?? {};
@@ -317,7 +387,7 @@ router.post("/initiate", async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// GET /api/payment/test  — diagnostic (remove in prod)
+// GET /api/payment/test  — diagnostic
 // ---------------------------------------------------------------------------
 router.get("/test", async (_req, res) => {
   const cfg = {
@@ -349,17 +419,20 @@ router.get("/test", async (_req, res) => {
   let chargesResult: unknown = null;
   if (token) {
     try {
-      const r = await fetch(`${(process.env.DIAMONOPAY_API_URL ?? "https://api.diamanopay.com").replace(/\/$/, "")}/api/charges`, {
-        method:  "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body:    JSON.stringify({
-          amount: 100, provider: "WAVE", description: "test",
-          clientReference: `DIAG-${Date.now()}`,
-          redirectUrl: "https://example.com",
-          webhook:     "https://example.com/wh",
-        }),
-        signal: AbortSignal.timeout(15_000),
-      });
+      const r = await fetch(
+        `${(process.env.DIAMONOPAY_API_URL ?? "https://api.diamanopay.com").replace(/\/$/, "")}/api/charges`,
+        {
+          method:  "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body:    JSON.stringify({
+            amount: 100, provider: "WAVE", description: "test",
+            clientReference: `DIAG-${Date.now()}`,
+            redirectUrl: "https://example.com",
+            webhook:     "https://example.com/wh",
+          }),
+          signal: AbortSignal.timeout(15_000),
+        }
+      );
       const txt = await r.text();
       try { chargesResult = { status: r.status, body: JSON.parse(txt) }; }
       catch { chargesResult = { status: r.status, body: txt }; }
