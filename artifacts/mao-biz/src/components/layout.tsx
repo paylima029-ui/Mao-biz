@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { Link, useLocation } from 'wouter';
-import { ShoppingCart, Search, X } from 'lucide-react';
+import { ShoppingCart, Search, X, Package } from 'lucide-react';
 import { useCart } from '@/lib/cart';
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -43,6 +43,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
               </button>
             )}
           </form>
+
+          {/* My orders */}
+          <Link href="/mes-commandes" className="p-1.5 shrink-0" title="Mes commandes">
+            <Package className="h-6 w-6" />
+          </Link>
 
           {/* Cart icon */}
           <Link href="/cart" className="relative p-1.5 shrink-0">

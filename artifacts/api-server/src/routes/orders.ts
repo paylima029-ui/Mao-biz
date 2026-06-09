@@ -21,6 +21,23 @@ function formatOrder(o: typeof ordersTable.$inferSelect) {
   };
 }
 
+// PUBLIC — customer order lookup by phone number
+router.get("/my-orders", async (req, res) => {
+  const phone = (req.query.phone as string | undefined)?.trim();
+  if (!phone) return res.status(400).json({ error: "Numéro de téléphone requis" });
+
+  // Normalize: keep only digits and leading +
+  const normalized = phone.replace(/\s/g, "");
+
+  const orders = await db
+    .select()
+    .from(ordersTable)
+    .where(eq(ordersTable.customerPhone, normalized))
+    .orderBy(ordersTable.createdAt);
+
+  return res.json(orders.map(formatOrder));
+});
+
 // PUBLIC — list orders (admin only)
 router.get("/", requireAdmin, async (req, res) => {
   const parsed = ListOrdersQueryParams.safeParse(req.query);
