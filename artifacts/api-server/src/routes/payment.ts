@@ -103,7 +103,9 @@ router.post("/create", async (req, res) => {
       description:     `Commande MAO-BIZ #${order.orderNumber}`,
       clientReference,
       customerPhone:   order.customerPhone,
-      redirectUrl:     `${base}/api/payment/callback?ref=${clientReference}`,
+      // Redirect directly to the Vite static frontend page — loads instantly
+      // even on Render cold start, then polls the API in the background.
+      redirectUrl:     `${base}/paiement?ref=${clientReference}`,
       webhookUrl:      `${base}/api/payment/webhook`,
       extraData: {
         orderId:       order.id,
@@ -360,7 +362,7 @@ router.post("/initiate", async (req, res) => {
       description:     `Commande MAO-BIZ #${order.orderNumber}`,
       clientReference,
       customerPhone:   order.customerPhone,
-      redirectUrl:     `${base}/api/payment/callback?ref=${clientReference}`,
+      redirectUrl:     `${base}/paiement?ref=${clientReference}`,
       webhookUrl:      `${base}/api/payment/webhook`,
     });
 

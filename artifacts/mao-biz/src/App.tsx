@@ -21,6 +21,7 @@ import OrderConfirmation from "@/pages/order-confirmation";
 import PaymentSuccess from "@/pages/payment-success";
 import PaymentError from "@/pages/payment-error";
 import MyOrders from "@/pages/my-orders";
+import PaymentProcessing from "@/pages/payment-processing";
 import AdminLogin from "@/pages/admin/login";
 import AdminDashboard from "@/pages/admin/dashboard";
 import AdminProducts from "@/pages/admin/products";
@@ -41,6 +42,7 @@ function Router() {
       <Route path="/payment-success" component={PaymentSuccess} />
       <Route path="/payment-error" component={PaymentError} />
       <Route path="/mes-commandes" component={MyOrders} />
+      <Route path="/paiement" component={PaymentProcessing} />
 
       <Route path="/admin/login" component={AdminLogin} />
       <Route path="/admin">
