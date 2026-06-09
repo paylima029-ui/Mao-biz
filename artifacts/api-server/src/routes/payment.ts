@@ -389,6 +389,41 @@ router.post("/initiate", async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// POST /api/payment/confirm
+// Called by the frontend when Diamanopay signals success in the redirect URL.
+// Marks the transaction as success if it is still pending.
+// ---------------------------------------------------------------------------
+router.post("/confirm", async (req, res) => {
+  const ref = (req.body?.ref as string | undefined)?.trim();
+  if (!ref) return res.status(400).json({ error: "ref requis" });
+
+  const txn = await findTransaction(ref);
+  if (!txn) return res.status(404).json({ error: "Transaction introuvable" });
+
+  // Only confirm if still pending (idempotent for already-confirmed)
+  if (txn.status !== "success") {
+    await db.update(transactionsTable)
+      .set({ status: "success", updatedAt: new Date() })
+      .where(eq(transactionsTable.id, txn.id));
+
+    if (txn.orderId) {
+      await db.update(ordersTable)
+        .set({ status: "confirmed" })
+        .where(eq(ordersTable.id, txn.orderId));
+    }
+    logger.info({ ref, txnId: txn.id }, "Transaction confirmée via signal Diamanopay");
+  }
+
+  return res.json({
+    status:          "success",
+    clientReference: txn.clientReference,
+    orderId:         txn.orderId,
+    amount:          txn.amount,
+    customerName:    txn.customerName,
+  });
+});
+
+// ---------------------------------------------------------------------------
 // GET /api/payment/test  — diagnostic
 // ---------------------------------------------------------------------------
 router.get("/test", async (_req, res) => {
