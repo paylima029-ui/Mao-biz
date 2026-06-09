@@ -29,7 +29,7 @@ export function ProductCard({ product }: { product: Product }) {
   return (
     <Link href={`/products/${product.id}`}>
       <Card className="h-full overflow-hidden hover-elevate transition-all border-none shadow-sm flex flex-col group cursor-pointer">
-        <div className="relative aspect-square overflow-hidden bg-muted/30">
+        <div className="relative h-36 md:h-40 overflow-hidden bg-muted/30">
           {product.isNew && (
             <Badge className="absolute top-2 left-2 z-10 bg-secondary text-secondary-foreground">Nouveau</Badge>
           )}
