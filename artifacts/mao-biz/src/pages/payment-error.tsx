@@ -18,19 +18,21 @@ const REASON_LABELS: Record<string, string> = {
 };
 
 const MAX_POLL_MS   = 90_000;
-const POLL_INTERVAL = 4_000;
+const POLL_INTERVAL = 3_000;
 
 export default function PaymentError() {
   const params = new URLSearchParams(
     typeof window !== "undefined" ? window.location.search : ""
   );
-  const reason  = params.get("reason") ?? "unknown";
-  const ref     = params.get("ref");
+  const reason = params.get("reason") ?? "unknown";
+  const ref    = params.get("ref");
 
   const message = REASON_LABELS[reason] ?? REASON_LABELS.unknown;
 
-  const [checking, setChecking]   = useState(!!ref);
-  const [, setLocation]           = useLocation();
+  // When ref is present, start in "checking" mode — hide the error UI until
+  // we've confirmed the payment is actually failed (not just a redirect race).
+  const [phase, setPhase] = useState<"checking" | "error">(ref ? "checking" : "error");
+  const [, setLocation]   = useLocation();
 
   useEffect(() => {
     if (!ref) return;
@@ -43,33 +45,68 @@ export default function PaymentError() {
     const poll = async () => {
       if (cancelled) return;
       try {
-        const r = await fetch(`${apiBase}/api/payment/status/${ref}`);
-        const d: { status?: string; orderId?: number } = await r.json();
+        const r = await fetch(`${apiBase}/api/payment/status/${encodeURIComponent(ref)}`);
+        if (r.ok) {
+          const d: { status?: string; orderId?: number; clientReference?: string } = await r.json();
 
-        if (d.status === "success") {
-          setLocation(`/payment-success?ref=${ref}&orderId=${d.orderId ?? ""}`);
-          return;
+          if (d.status === "success") {
+            const successRef = d.clientReference ?? ref;
+            setLocation(`/payment-success?ref=${encodeURIComponent(successRef)}&orderId=${d.orderId ?? ""}`);
+            return;
+          }
+
+          // Status is explicitly failed/cancelled — stop polling and show error
+          if (d.status === "failed" || d.status === "cancelled" || d.status === "expired") {
+            setPhase("error");
+            return;
+          }
+        } else if (r.status === 404) {
+          // Transaction not found yet — keep polling for a bit, then give up
         }
       } catch {
-        // ignore network errors during polling
+        // network error — keep polling
       }
 
       elapsed += POLL_INTERVAL;
       if (elapsed >= MAX_POLL_MS) {
-        setChecking(false);
+        setPhase("error");
         return;
       }
 
       setTimeout(poll, POLL_INTERVAL);
     };
 
-    const timer = setTimeout(poll, POLL_INTERVAL);
+    // Poll immediately on mount — no initial delay
+    void poll();
 
     return () => {
       cancelled = true;
-      clearTimeout(timer);
     };
   }, [ref, setLocation]);
+
+  if (phase === "checking") {
+    return (
+      <Layout>
+        <div className="min-h-[70vh] flex items-center justify-center px-4 py-16">
+          <div className="max-w-md w-full text-center space-y-6">
+            <div className="flex justify-center">
+              <div className="w-24 h-24 rounded-full bg-orange-100 flex items-center justify-center">
+                <Loader2 className="h-14 w-14 text-orange-500 animate-spin" />
+              </div>
+            </div>
+            <div>
+              <h1 className="text-2xl font-extrabold text-gray-900 mb-2">
+                Vérification du paiement…
+              </h1>
+              <p className="text-muted-foreground">
+                Veuillez patienter quelques secondes.
+              </p>
+            </div>
+          </div>
+        </div>
+      </Layout>
+    );
+  }
 
   return (
     <Layout>
@@ -95,17 +132,10 @@ export default function PaymentError() {
             </div>
           )}
 
-          {checking ? (
-            <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span>Vérification du statut en cours…</span>
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              Votre commande est enregistrée. Vous pouvez réessayer le paiement ou choisir
-              le paiement à la livraison.
-            </p>
-          )}
+          <p className="text-sm text-muted-foreground">
+            Votre commande est enregistrée. Vous pouvez réessayer le paiement ou choisir
+            le paiement à la livraison.
+          </p>
 
           <div className="flex flex-col sm:flex-row gap-3 justify-center">
             <Button asChild size="lg" className="font-bold text-white">
