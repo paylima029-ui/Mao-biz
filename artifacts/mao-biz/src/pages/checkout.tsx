@@ -51,70 +51,82 @@ export default function Checkout() {
   const deliveryFee = selectedZone ? Number(selectedZone.price) : 0;
   const grandTotal  = total + deliveryFee;
 
+  const [progressStep, setProgressStep] = useState<string>("");
+
   const onSubmit = async (data: CheckoutFormValues) => {
-    createOrder.mutate({
-      data: {
-        customerName:    data.customerName,
-        customerPhone:   data.customerPhone,
-        customerAddress: data.customerAddress,
-        paymentMethod:   data.paymentMethod,
-        items: items.map(item => ({
-          productId:       item.productId,
-          productName:     item.productName,
-          productImageUrl: item.productImageUrl,
-          quantity:        item.quantity,
-          unitPrice:       item.unitPrice,
-        })),
-        deliveryZoneId:   selectedZone?.id   ?? null,
-        deliveryZoneName: selectedZone?.name ?? null,
-        deliveryFee:      deliveryFee,
-      }
-    }, {
-      onSuccess: async (order) => {
+    const apiBase = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
+    const orderItems = items.map(item => ({
+      productId:       item.productId,
+      productName:     item.productName,
+      productImageUrl: item.productImageUrl,
+      quantity:        item.quantity,
+      unitPrice:       item.unitPrice,
+    }));
+
+    // Cash / paiement à la livraison — old path (no Diamanopay)
+    if (data.paymentMethod === "cash") {
+      createOrder.mutate({
+        data: {
+          customerName:    data.customerName,
+          customerPhone:   data.customerPhone,
+          customerAddress: data.customerAddress,
+          paymentMethod:   data.paymentMethod,
+          items:           orderItems,
+          deliveryZoneId:  selectedZone?.id   ?? null,
+          deliveryZoneName: selectedZone?.name ?? null,
+          deliveryFee:     deliveryFee,
+        }
+      }, {
+        onSuccess: (order) => { clearCart(); setLocation(`/order-confirmation/${order.id}`); },
+        onError: () => {
+          toast({ title: "Erreur", description: "Impossible de créer la commande.", variant: "destructive" });
+        }
+      });
+      return;
+    }
+
+    // Mobile money — single combined call (order + payment in one request)
+    setRedirecting(true);
+    setProgressStep("Création de la commande…");
+    try {
+      const res = await fetch(`${apiBase}/api/payment/checkout`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customerName:    data.customerName,
+          customerPhone:   data.customerPhone,
+          customerAddress: data.customerAddress,
+          paymentMethod:   data.paymentMethod,
+          items:           orderItems,
+          deliveryZoneId:  selectedZone?.id   ?? null,
+          deliveryZoneName: selectedZone?.name ?? null,
+          deliveryFee:     deliveryFee,
+        }),
+      });
+      const result = await res.json();
+
+      if (res.ok && result.paymentUrl) {
         clearCart();
-
-        if (data.paymentMethod === "cash" as string) {
-          setLocation(`/order-confirmation/${order.id}`);
-          return;
-        }
-
-        setRedirecting(true);
-        try {
-          const apiBase = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
-          const res = await fetch(`${apiBase}/api/payment/create`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ orderId: order.id }),
-          });
-          const result = await res.json();
-
-          if (res.ok && result.paymentUrl) {
-            window.location.href = result.paymentUrl;
-          } else {
-            toast({
-              title: "Paiement impossible",
-              description: result?.error ?? "Échec du paiement en ligne.",
-              variant: "destructive",
-            });
-            setRedirecting(false);
-          }
-        } catch {
-          toast({
-            title: "Erreur réseau",
-            description: "Impossible de joindre le service de paiement. Veuillez réessayer.",
-            variant: "destructive",
-          });
-          setRedirecting(false);
-        }
-      },
-      onError: () => {
+        setProgressStep("Redirection vers le paiement…");
+        window.location.href = result.paymentUrl;
+      } else {
         toast({
-          title: "Erreur",
-          description: "Impossible de créer la commande. Veuillez réessayer.",
-          variant: "destructive",
+          title:       "Paiement impossible",
+          description: result?.error ?? "Échec du paiement en ligne.",
+          variant:     "destructive",
         });
+        setRedirecting(false);
+        setProgressStep("");
       }
-    });
+    } catch {
+      toast({
+        title:       "Erreur réseau",
+        description: "Impossible de joindre le service de paiement. Veuillez réessayer.",
+        variant:     "destructive",
+      });
+      setRedirecting(false);
+      setProgressStep("");
+    }
   };
 
   const paymentMethod = form.watch("paymentMethod");
@@ -330,8 +342,13 @@ export default function Checkout() {
                 {/* Submit desktop */}
                 <div className="hidden lg:block">
                   <Button type="submit" size="lg" className="w-full h-14 font-black text-lg text-white" disabled={isPending}>
-                    {isPending ? (redirecting ? "Redirection en cours..." : "Traitement...") : (
-                      paymentMethod === 'cash' ? "Confirmer la commande" : "Payer avec Diamonopay"
+                    {isPending ? (
+                      <span className="flex items-center gap-2">
+                        <Loader2 className="h-5 w-5 animate-spin" />
+                        {progressStep || "Traitement…"}
+                      </span>
+                    ) : (
+                      paymentMethod === 'cash' ? "Confirmer la commande" : "Payer avec Diamanopay"
                     )}
                   </Button>
                 </div>
@@ -386,8 +403,13 @@ export default function Checkout() {
           className="w-full h-14 font-black text-lg text-white"
           disabled={isPending}
         >
-          {isPending ? (redirecting ? "Redirection..." : "Traitement...") : (
-            paymentMethod === 'cash' ? "Confirmer la commande" : "Payer avec Diamonopay"
+          {isPending ? (
+            <span className="flex items-center gap-2">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              {progressStep || "Traitement…"}
+            </span>
+          ) : (
+            paymentMethod === 'cash' ? "Confirmer la commande" : "Payer avec Diamanopay"
           )}
         </Button>
       </div>

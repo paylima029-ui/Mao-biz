@@ -46,7 +46,9 @@ export default function Cart() {
                   <div className="flex justify-between items-start pr-8">
                     <h3 className="font-bold text-base leading-tight line-clamp-2">{item.productName}</h3>
                   </div>
-                  <div className="font-extrabold text-primary">{item.unitPrice.toLocaleString()} FCFA</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">
+                    Prix unitaire : {item.unitPrice.toLocaleString()} FCFA
+                  </div>
                   
                   <div className="flex items-center justify-between mt-2">
                     <div className="flex items-center border rounded-md">
@@ -59,6 +61,9 @@ export default function Cart() {
                         onClick={() => updateQuantity(item.productId, item.quantity + 1)}
                         className="w-8 h-8 flex items-center justify-center hover:bg-muted font-bold"
                       >+</button>
+                    </div>
+                    <div className="font-extrabold text-primary text-base">
+                      {(item.unitPrice * item.quantity).toLocaleString()} FCFA
                     </div>
                   </div>
                 </div>

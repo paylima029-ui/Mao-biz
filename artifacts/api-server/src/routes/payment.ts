@@ -389,6 +389,97 @@ router.post("/initiate", async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// POST /api/payment/checkout  — create order + initiate payment in ONE call
+// Cuts latency in half vs doing them sequentially from the frontend.
+// ---------------------------------------------------------------------------
+router.post("/checkout", async (req, res) => {
+  const {
+    customerName, customerPhone, customerAddress,
+    paymentMethod, items, deliveryZoneId, deliveryZoneName, deliveryFee: rawFee,
+  } = req.body ?? {};
+
+  if (!customerName || !customerPhone || !customerAddress || !paymentMethod || !Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ error: "Données de commande incomplètes" });
+  }
+
+  const provider = PROVIDER_MAP[paymentMethod as string];
+  if (!provider) {
+    return res.status(400).json({ error: `Mode de paiement non supporté: ${paymentMethod}` });
+  }
+
+  if (!DIAMANOPAY_CONFIGURED) {
+    return res.status(503).json({
+      error: "Paiement en ligne non disponible : DIAMONOPAY_ACCESS_TOKEN ou DIAMONOPAY_CLIENT_ID/CLIENT_SECRET manquant.",
+    });
+  }
+
+  const fee       = Number(rawFee ?? 0) || 0;
+  const itemsTotal = (items as { unitPrice: number; quantity: number }[])
+    .reduce((s, i) => s + Number(i.unitPrice) * Number(i.quantity), 0);
+  const total = itemsTotal + fee;
+  const orderNumber = `MAO-${Date.now().toString(36).toUpperCase()}`;
+
+  // 1. Create order
+  const [order] = await db.insert(ordersTable).values({
+    orderNumber,
+    customerName:    String(customerName),
+    customerPhone:   String(customerPhone),
+    customerAddress: String(customerAddress),
+    items,
+    total:           total.toString(),
+    paymentMethod:   String(paymentMethod),
+    status:          "payment_initiated",
+    deliveryZoneId:  deliveryZoneId ?? null,
+    deliveryZoneName: deliveryZoneName ?? null,
+    deliveryFee:     fee.toString(),
+  }).returning();
+
+  const base            = getBaseUrl();
+  const clientReference = makeClientRef(order.id);
+
+  try {
+    // 2. Initiate payment (in same request)
+    const charge = await createCharge({
+      amount:          total,
+      provider,
+      description:     `Commande MAO-BIZ #${orderNumber}`,
+      clientReference,
+      customerPhone:   String(customerPhone),
+      redirectUrl:     `${base}/paiement?ref=${clientReference}`,
+      webhookUrl:      `${base}/api/payment/webhook`,
+      extraData: { orderId: order.id, orderNumber, customerName, paymentMethod },
+    });
+
+    await db.insert(transactionsTable).values({
+      transactionId:   charge.chargeId ?? null,
+      chargeId:        charge.chargeId ?? null,
+      clientReference,
+      orderId:         order.id,
+      customerName:    String(customerName),
+      customerPhone:   String(customerPhone),
+      amount:          total.toString(),
+      currency:        "XOF",
+      paymentMethod:   String(paymentMethod),
+      status:          "pending",
+      paymentUrl:      charge.paymentUrl,
+    });
+
+    return res.json({
+      paymentUrl:      charge.paymentUrl,
+      clientReference,
+      orderId:         order.id,
+      orderNumber,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logger.error({ msg, orderId: order.id }, "Diamanopay checkout échoué");
+    // Downgrade order status so the customer can retry
+    await db.update(ordersTable).set({ status: "pending" }).where(eq(ordersTable.id, order.id));
+    return res.status(502).json({ error: msg, orderId: order.id });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // POST /api/payment/confirm
 // Called by the frontend when Diamanopay signals success in the redirect URL.
 // Marks the transaction as success if it is still pending.
