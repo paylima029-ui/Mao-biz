@@ -1,20 +1,26 @@
-import { Link } from "wouter";
-import { XCircle, RotateCcw, Home } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useLocation, Link } from "wouter";
+import { XCircle, RotateCcw, Home, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Layout } from "@/components/layout";
 
 const REASON_LABELS: Record<string, string> = {
   failed:          "Le paiement a été refusé.",
+  failure:         "Le paiement a été refusé.",
   cancelled:       "Vous avez annulé le paiement.",
+  canceled:        "Vous avez annulé le paiement.",
   expired:         "La session de paiement a expiré.",
+  rejected:        "Le paiement a été rejeté.",
+  error:           "Une erreur est survenue côté opérateur.",
   missing_ref:     "Référence de paiement manquante.",
   not_found:       "Transaction introuvable.",
   unknown:         "Une erreur inconnue s'est produite.",
 };
 
+const MAX_POLL_MS   = 90_000;
+const POLL_INTERVAL = 4_000;
+
 export default function PaymentError() {
-  // useLocation() from wouter does NOT include the query string.
-  // Always use window.location.search to read query params.
   const params = new URLSearchParams(
     typeof window !== "undefined" ? window.location.search : ""
   );
@@ -22,6 +28,48 @@ export default function PaymentError() {
   const ref     = params.get("ref");
 
   const message = REASON_LABELS[reason] ?? REASON_LABELS.unknown;
+
+  const [checking, setChecking]   = useState(!!ref);
+  const [, setLocation]           = useLocation();
+
+  useEffect(() => {
+    if (!ref) return;
+
+    let elapsed  = 0;
+    let cancelled = false;
+
+    const apiBase = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
+
+    const poll = async () => {
+      if (cancelled) return;
+      try {
+        const r = await fetch(`${apiBase}/api/payment/status/${ref}`);
+        const d: { status?: string; orderId?: number } = await r.json();
+
+        if (d.status === "success") {
+          setLocation(`/payment-success?ref=${ref}&orderId=${d.orderId ?? ""}`);
+          return;
+        }
+      } catch {
+        // ignore network errors during polling
+      }
+
+      elapsed += POLL_INTERVAL;
+      if (elapsed >= MAX_POLL_MS) {
+        setChecking(false);
+        return;
+      }
+
+      setTimeout(poll, POLL_INTERVAL);
+    };
+
+    const timer = setTimeout(poll, POLL_INTERVAL);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [ref, setLocation]);
 
   return (
     <Layout>
@@ -47,10 +95,17 @@ export default function PaymentError() {
             </div>
           )}
 
-          <p className="text-sm text-muted-foreground">
-            Votre commande est enregistrée. Vous pouvez réessayer le paiement ou choisir
-            le paiement à la livraison.
-          </p>
+          {checking ? (
+            <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span>Vérification du statut en cours…</span>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Votre commande est enregistrée. Vous pouvez réessayer le paiement ou choisir
+              le paiement à la livraison.
+            </p>
+          )}
 
           <div className="flex flex-col sm:flex-row gap-3 justify-center">
             <Button asChild size="lg" className="font-bold text-white">
