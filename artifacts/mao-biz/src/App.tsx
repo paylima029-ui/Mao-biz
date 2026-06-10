@@ -6,6 +6,8 @@ import { CartProvider } from "@/lib/cart";
 import { AuthProvider } from "@/lib/auth";
 import { AdminRoute } from "@/components/admin-route";
 import { setBaseUrl } from "@workspace/api-client-react";
+import { Onboarding } from "@/components/onboarding";
+import { PWAInstallBanner } from "@/components/pwa-install-banner";
 
 // Point the API client to the right server (empty string = relative, fine for local dev behind proxy)
 setBaseUrl(import.meta.env.VITE_API_URL ?? "");
@@ -96,6 +98,8 @@ function App() {
               <Router />
             </WouterRouter>
             <Toaster />
+            <Onboarding />
+            <PWAInstallBanner />
           </TooltipProvider>
         </CartProvider>
       </AuthProvider>
