@@ -140,9 +140,9 @@ export default function Products() {
 
         {/* Products grid */}
         {isLoading ? (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
             {Array.from({ length: 8 }).map((_, i) => (
-              <Skeleton key={i} className="h-72 w-full rounded-xl" />
+              <Skeleton key={i} className="h-52 w-full rounded-lg" />
             ))}
           </div>
         ) : !products?.length ? (
@@ -160,7 +160,7 @@ export default function Products() {
             <p className="text-sm text-muted-foreground mb-4">
               {products.length} produit{products.length > 1 ? "s" : ""}
             </p>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
               {products.map(product => (
                 <ProductCard key={product.id} product={product} />
               ))}

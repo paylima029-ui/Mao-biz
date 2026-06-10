@@ -10,14 +10,14 @@ import { Badge, ChevronRight } from "lucide-react";
 function ProductGrid({ products, loading }: { products: any[] | undefined; loading: boolean }) {
   if (loading) {
     return (
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-64 w-full rounded-xl" />)}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-52 w-full rounded-lg" />)}
       </div>
     );
   }
   if (!products?.length) return null;
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
       {products.slice(0, 8).map((product) => (
         <ProductCard key={product.id} product={product} />
       ))}
