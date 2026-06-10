@@ -8,6 +8,7 @@
 
 export * from './adminStats';
 export * from './category';
+export * from './categoryInput';
 export * from './deliveryZone';
 export * from './deliveryZoneInput';
 export * from './healthStatus';

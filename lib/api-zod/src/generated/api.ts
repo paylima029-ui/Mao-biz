@@ -276,6 +276,57 @@ export const ListDeliveryZonesResponse = zod.array(ListDeliveryZonesResponseItem
 
 
 /**
+ * @summary List all categories (admin)
+ */
+export const AdminListCategoriesResponseItem = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "slug": zod.string(),
+  "icon": zod.string()
+})
+export const AdminListCategoriesResponse = zod.array(AdminListCategoriesResponseItem)
+
+
+/**
+ * @summary Create a category (admin)
+ */
+export const AdminCreateCategoryBody = zod.object({
+  "name": zod.string(),
+  "slug": zod.string(),
+  "icon": zod.string()
+})
+
+
+/**
+ * @summary Update a category (admin)
+ */
+export const AdminUpdateCategoryParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const AdminUpdateCategoryBody = zod.object({
+  "name": zod.string(),
+  "slug": zod.string(),
+  "icon": zod.string()
+})
+
+export const AdminUpdateCategoryResponse = zod.object({
+  "id": zod.number(),
+  "name": zod.string(),
+  "slug": zod.string(),
+  "icon": zod.string()
+})
+
+
+/**
+ * @summary Delete a category (admin)
+ */
+export const AdminDeleteCategoryParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+
+/**
  * @summary List all delivery zones (admin)
  */
 export const AdminListDeliveryZonesResponseItem = zod.object({

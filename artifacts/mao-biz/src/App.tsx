@@ -27,8 +27,18 @@ import AdminDashboard from "@/pages/admin/dashboard";
 import AdminProducts from "@/pages/admin/products";
 import AdminOrders from "@/pages/admin/orders";
 import AdminDeliveryZones from "@/pages/admin/delivery-zones";
+import AdminCategories from "@/pages/admin/categories";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime:    60_000,
+      gcTime:       5 * 60_000,
+      refetchOnWindowFocus: false,
+      retry: 1,
+    },
+  },
+});
 
 function Router() {
   return (
@@ -63,6 +73,11 @@ function Router() {
       <Route path="/admin/delivery-zones">
         <AdminRoute>
           <AdminDeliveryZones />
+        </AdminRoute>
+      </Route>
+      <Route path="/admin/categories">
+        <AdminRoute>
+          <AdminCategories />
         </AdminRoute>
       </Route>
 

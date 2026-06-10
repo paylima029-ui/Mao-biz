@@ -5,7 +5,8 @@ import {
   useCreateProduct,
   useUpdateProduct,
   useDeleteProduct,
-  getListProductsQueryKey
+  getListProductsQueryKey,
+  useAdminListCategories,
 } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,13 +23,6 @@ import { Plus, Edit2, Trash2, Search, Upload, X, Image } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
-const CATEGORIES = [
-  { slug: "parfums", label: "Parfums" },
-  { slug: "maillots", label: "Maillots" },
-  { slug: "chaussures", label: "Chaussures" },
-  { slug: "bracelets", label: "Bracelets" },
-  { slug: "accessoires", label: "Accessoires" },
-];
 
 const productSchema = z.object({
   name: z.string().min(2, "Minimum 2 caractères"),
@@ -139,6 +133,7 @@ function ImageUploader({
 export default function AdminProducts() {
   const [search, setSearch] = useState("");
   const { data: products, isLoading } = useListProducts({ search });
+  const { data: categories = [] } = useAdminListCategories();
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -274,9 +269,16 @@ export default function AdminProducts() {
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          {CATEGORIES.map(c => (
-                            <SelectItem key={c.slug} value={c.slug}>{c.label}</SelectItem>
+                          {categories.map(c => (
+                            <SelectItem key={c.slug} value={c.slug}>
+                              {c.icon} {c.name}
+                            </SelectItem>
                           ))}
+                          {categories.length === 0 && (
+                            <div className="px-3 py-2 text-xs text-muted-foreground">
+                              Aucune catégorie — créez-en d'abord dans "Catégories"
+                            </div>
+                          )}
                         </SelectContent>
                       </Select>
                       <FormMessage />

@@ -16,6 +16,12 @@ export interface Category {
   icon: string;
 }
 
+export interface CategoryInput {
+  name: string;
+  slug: string;
+  icon: string;
+}
+
 export interface Product {
   id: number;
   name: string;

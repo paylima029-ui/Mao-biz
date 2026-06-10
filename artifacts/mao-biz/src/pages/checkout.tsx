@@ -1,9 +1,10 @@
 import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { useCart } from "@/lib/cart";
 import { useLocation, Link } from "wouter";
-import { ArrowLeft, ShieldCheck, HandCoins, Smartphone, Wifi, Zap, MapPin, Loader2 } from "lucide-react";
+import { ArrowLeft, ShieldCheck, HandCoins, Smartphone, Wifi, Zap, MapPin, Loader2, User, Phone, Home } from "lucide-react";
 import { useCreateOrder, useListDeliveryZones } from "@workspace/api-client-react";
 import type { DeliveryZone } from "@workspace/api-client-react";
 import { useForm } from "react-hook-form";
@@ -12,13 +13,16 @@ import { z } from "zod";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useToast } from "@/hooks/use-toast";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 const checkoutSchema = z.object({
-  customerName:    z.string().min(2, "Nom trop court"),
-  customerPhone:   z.string().min(8, "Numéro invalide"),
-  customerAddress: z.string().min(5, "Adresse trop courte"),
-  paymentMethod:   z.enum(["wave", "orange_money", "free_money", "expresso", "cash"]),
+  customerName:         z.string().min(2, "Nom trop court"),
+  customerPhone:        z.string().min(8, "Numéro invalide"),
+  customerPhone2:       z.string().optional(),
+  customerCity:         z.string().min(2, "Ville requise"),
+  customerNeighborhood: z.string().min(2, "Quartier/Commune requis"),
+  customerAddress:      z.string().min(5, "Adresse trop courte"),
+  paymentMethod: z.enum(["wave", "orange_money", "free_money", "expresso", "cash"]),
 });
 
 type CheckoutFormValues = z.infer<typeof checkoutSchema>;
@@ -29,6 +33,7 @@ export default function Checkout() {
   const { toast } = useToast();
   const createOrder = useCreateOrder();
   const [redirecting, setRedirecting] = useState(false);
+  const [progressStep, setProgressStep] = useState<string>("");
   const [selectedZone, setSelectedZone] = useState<DeliveryZone | null>(null);
 
   const { data: deliveryZones = [], isLoading: loadingZones } = useListDeliveryZones();
@@ -36,12 +41,29 @@ export default function Checkout() {
   const form = useForm<CheckoutFormValues>({
     resolver: zodResolver(checkoutSchema),
     defaultValues: {
-      customerName:    "",
-      customerPhone:   "",
-      customerAddress: "",
-      paymentMethod:   "wave",
+      customerName:         "",
+      customerPhone:        "",
+      customerPhone2:       "",
+      customerCity:         "",
+      customerNeighborhood: "",
+      customerAddress:      "",
+      paymentMethod:        "wave",
     },
   });
+
+  // Reset form on every mount to prevent showing previous customer's data
+  useEffect(() => {
+    form.reset({
+      customerName:         "",
+      customerPhone:        "",
+      customerPhone2:       "",
+      customerCity:         "",
+      customerNeighborhood: "",
+      customerAddress:      "",
+      paymentMethod:        "wave",
+    });
+    setSelectedZone(null);
+  }, []);
 
   if (items.length === 0) {
     setLocation('/cart');
@@ -51,10 +73,16 @@ export default function Checkout() {
   const deliveryFee = selectedZone ? Number(selectedZone.price) : 0;
   const grandTotal  = total + deliveryFee;
 
-  const [progressStep, setProgressStep] = useState<string>("");
+  // Build a full address string from the structured fields
+  const buildFullAddress = (data: CheckoutFormValues) => {
+    const parts = [data.customerNeighborhood, data.customerCity, data.customerAddress].filter(Boolean);
+    const phone2 = data.customerPhone2 ? ` | Tél2: ${data.customerPhone2}` : "";
+    return parts.join(", ") + phone2;
+  };
 
   const onSubmit = async (data: CheckoutFormValues) => {
     const apiBase = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
+    const fullAddress = buildFullAddress(data);
     const orderItems = items.map(item => ({
       productId:       item.productId,
       productName:     item.productName,
@@ -63,13 +91,13 @@ export default function Checkout() {
       unitPrice:       item.unitPrice,
     }));
 
-    // Cash / paiement à la livraison — old path (no Diamanopay)
+    // Cash / paiement à la livraison
     if (data.paymentMethod === "cash") {
       createOrder.mutate({
         data: {
           customerName:    data.customerName,
           customerPhone:   data.customerPhone,
-          customerAddress: data.customerAddress,
+          customerAddress: fullAddress,
           paymentMethod:   data.paymentMethod,
           items:           orderItems,
           deliveryZoneId:  selectedZone?.id   ?? null,
@@ -78,14 +106,12 @@ export default function Checkout() {
         }
       }, {
         onSuccess: (order) => { clearCart(); setLocation(`/order-confirmation/${order.id}`); },
-        onError: () => {
-          toast({ title: "Erreur", description: "Impossible de créer la commande.", variant: "destructive" });
-        }
+        onError:   () => toast({ title: "Erreur", description: "Impossible de créer la commande.", variant: "destructive" }),
       });
       return;
     }
 
-    // Mobile money — single combined call (order + payment in one request)
+    // Mobile money — appel combiné (commande + paiement en 1 requête)
     setRedirecting(true);
     setProgressStep("Création de la commande…");
     try {
@@ -95,7 +121,7 @@ export default function Checkout() {
         body: JSON.stringify({
           customerName:    data.customerName,
           customerPhone:   data.customerPhone,
-          customerAddress: data.customerAddress,
+          customerAddress: fullAddress,
           paymentMethod:   data.paymentMethod,
           items:           orderItems,
           deliveryZoneId:  selectedZone?.id   ?? null,
@@ -110,20 +136,12 @@ export default function Checkout() {
         setProgressStep("Redirection vers le paiement…");
         window.location.href = result.paymentUrl;
       } else {
-        toast({
-          title:       "Paiement impossible",
-          description: result?.error ?? "Échec du paiement en ligne.",
-          variant:     "destructive",
-        });
+        toast({ title: "Paiement impossible", description: result?.error ?? "Échec du paiement en ligne.", variant: "destructive" });
         setRedirecting(false);
         setProgressStep("");
       }
     } catch {
-      toast({
-        title:       "Erreur réseau",
-        description: "Impossible de joindre le service de paiement. Veuillez réessayer.",
-        variant:     "destructive",
-      });
+      toast({ title: "Erreur réseau", description: "Impossible de joindre le service de paiement. Veuillez réessayer.", variant: "destructive" });
       setRedirecting(false);
       setProgressStep("");
     }
@@ -146,33 +164,87 @@ export default function Checkout() {
           <div>
             <Form {...form}>
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+
                 {/* Customer info */}
                 <div className="bg-white p-6 rounded-xl shadow-sm border">
-                  <h2 className="text-lg font-bold mb-5 border-b pb-3">Vos informations</h2>
+                  <h2 className="text-lg font-bold mb-5 border-b pb-3 flex items-center gap-2">
+                    <User className="h-5 w-5 text-primary" /> Vos informations
+                  </h2>
                   <div className="space-y-4">
                     <FormField control={form.control} name="customerName" render={({ field }) => (
                       <FormItem>
-                        <FormLabel className="font-semibold">Nom complet</FormLabel>
+                        <FormLabel className="font-semibold">Nom complet <span className="text-destructive">*</span></FormLabel>
                         <FormControl>
-                          <Input placeholder="Jean Dupont" className="h-12 bg-muted/50" {...field} />
+                          <Input placeholder="Prénom Nom" className="h-12 bg-muted/50" {...field} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
                     )} />
-                    <FormField control={form.control} name="customerPhone" render={({ field }) => (
-                      <FormItem>
-                        <FormLabel className="font-semibold">Numéro de téléphone</FormLabel>
-                        <FormControl>
-                          <Input placeholder="+225 XX XX XX XX" className="h-12 bg-muted/50" {...field} />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )} />
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <FormField control={form.control} name="customerPhone" render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="font-semibold">Téléphone principal <span className="text-destructive">*</span></FormLabel>
+                          <FormControl>
+                            <div className="relative">
+                              <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                              <Input placeholder="77 XXX XX XX" className="h-12 bg-muted/50 pl-9" {...field} />
+                            </div>
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )} />
+                      <FormField control={form.control} name="customerPhone2" render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="font-semibold text-muted-foreground">2ème numéro</FormLabel>
+                          <FormControl>
+                            <div className="relative">
+                              <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                              <Input placeholder="Optionnel" className="h-12 bg-muted/50 pl-9" {...field} />
+                            </div>
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )} />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Delivery address */}
+                <div className="bg-white p-6 rounded-xl shadow-sm border">
+                  <h2 className="text-lg font-bold mb-5 border-b pb-3 flex items-center gap-2">
+                    <Home className="h-5 w-5 text-primary" /> Adresse de livraison
+                  </h2>
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-3">
+                      <FormField control={form.control} name="customerCity" render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="font-semibold">Ville / Région <span className="text-destructive">*</span></FormLabel>
+                          <FormControl>
+                            <Input placeholder="Ex: Dakar, Thiès…" className="h-12 bg-muted/50" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )} />
+                      <FormField control={form.control} name="customerNeighborhood" render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="font-semibold">Quartier / Commune <span className="text-destructive">*</span></FormLabel>
+                          <FormControl>
+                            <Input placeholder="Ex: Plateau, Medina…" className="h-12 bg-muted/50" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )} />
+                    </div>
                     <FormField control={form.control} name="customerAddress" render={({ field }) => (
                       <FormItem>
-                        <FormLabel className="font-semibold">Adresse de livraison</FormLabel>
+                        <FormLabel className="font-semibold">Adresse précise / Repère <span className="text-destructive">*</span></FormLabel>
                         <FormControl>
-                          <Input placeholder="Quartier, Rue, Repère..." className="h-12 bg-muted/50" {...field} />
+                          <Textarea
+                            placeholder="Numéro de rue, immeuble, repère visible (kiosque, école, mosquée…)"
+                            className="bg-muted/50 min-h-[80px] resize-none"
+                            {...field}
+                          />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -193,7 +265,6 @@ export default function Checkout() {
                     <p className="text-sm text-muted-foreground py-2">Aucune zone définie — livraison à négocier.</p>
                   ) : (
                     <div className="space-y-3">
-                      {/* "No zone" option */}
                       <label
                         className={`flex items-center gap-3 rounded-xl border-2 p-4 cursor-pointer transition-all ${
                           selectedZone === null ? "border-primary bg-primary/5" : "border-border hover:border-primary/50"
@@ -223,9 +294,7 @@ export default function Checkout() {
                           </div>
                           <div className="flex-1 min-w-0">
                             <p className="font-semibold text-sm">{zone.name}</p>
-                            {zone.description && (
-                              <p className="text-xs text-muted-foreground truncate">{zone.description}</p>
-                            )}
+                            {zone.description && <p className="text-xs text-muted-foreground truncate">{zone.description}</p>}
                           </div>
                           <span className="text-sm font-black text-primary shrink-0">
                             {Number(zone.price) === 0 ? (
@@ -246,72 +315,28 @@ export default function Checkout() {
                   <FormField control={form.control} name="paymentMethod" render={({ field }) => (
                     <FormItem>
                       <FormControl>
-                        <RadioGroup
-                          onValueChange={field.onChange}
-                          defaultValue={field.value}
-                          className="space-y-3"
-                        >
-                          {/* Wave */}
-                          <label className={`flex items-center gap-3 rounded-xl border-2 p-4 cursor-pointer transition-all ${field.value === 'wave' ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'}`}>
-                            <RadioGroupItem value="wave" className="shrink-0" />
-                            <div className="flex items-center gap-3 flex-1">
-                              <div className="w-10 h-10 rounded-full bg-blue-500 flex items-center justify-center shrink-0">
-                                <Wifi className="h-5 w-5 text-white" />
+                        <RadioGroup onValueChange={field.onChange} defaultValue={field.value} className="space-y-3">
+                          {[
+                            { value: "wave",         label: "Wave",           sub: "Paiement mobile Wave",     color: "bg-blue-500",   Icon: Wifi },
+                            { value: "orange_money", label: "Orange Money",   sub: "Paiement mobile Orange",   color: "bg-orange-500", Icon: Smartphone },
+                            { value: "free_money",   label: "Free Money",     sub: "Paiement mobile Free",     color: "bg-purple-600", Icon: Zap },
+                            { value: "expresso",     label: "Expresso Money", sub: "Paiement mobile Expresso", color: "bg-red-600",    Icon: Smartphone },
+                          ].map(({ value, label, sub, color, Icon }) => (
+                            <label key={value} className={`flex items-center gap-3 rounded-xl border-2 p-4 cursor-pointer transition-all ${field.value === value ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'}`}>
+                              <RadioGroupItem value={value} className="shrink-0" />
+                              <div className="flex items-center gap-3 flex-1">
+                                <div className={`w-10 h-10 rounded-full ${color} flex items-center justify-center shrink-0`}>
+                                  <Icon className="h-5 w-5 text-white" />
+                                </div>
+                                <div>
+                                  <p className="font-bold text-sm">{label}</p>
+                                  <p className="text-xs text-muted-foreground">{sub}</p>
+                                </div>
                               </div>
-                              <div>
-                                <p className="font-bold text-sm">Wave</p>
-                                <p className="text-xs text-muted-foreground">Paiement mobile Wave</p>
-                              </div>
-                            </div>
-                            {field.value === 'wave' && <ShieldCheck className="h-5 w-5 text-green-500 shrink-0" />}
-                          </label>
+                              {field.value === value && <ShieldCheck className="h-5 w-5 text-green-500 shrink-0" />}
+                            </label>
+                          ))}
 
-                          {/* Orange Money */}
-                          <label className={`flex items-center gap-3 rounded-xl border-2 p-4 cursor-pointer transition-all ${field.value === 'orange_money' ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'}`}>
-                            <RadioGroupItem value="orange_money" className="shrink-0" />
-                            <div className="flex items-center gap-3 flex-1">
-                              <div className="w-10 h-10 rounded-full bg-orange-500 flex items-center justify-center shrink-0">
-                                <Smartphone className="h-5 w-5 text-white" />
-                              </div>
-                              <div>
-                                <p className="font-bold text-sm">Orange Money</p>
-                                <p className="text-xs text-muted-foreground">Paiement mobile Orange</p>
-                              </div>
-                            </div>
-                            {field.value === 'orange_money' && <ShieldCheck className="h-5 w-5 text-green-500 shrink-0" />}
-                          </label>
-
-                          {/* Free Money */}
-                          <label className={`flex items-center gap-3 rounded-xl border-2 p-4 cursor-pointer transition-all ${field.value === 'free_money' ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'}`}>
-                            <RadioGroupItem value="free_money" className="shrink-0" />
-                            <div className="flex items-center gap-3 flex-1">
-                              <div className="w-10 h-10 rounded-full bg-purple-600 flex items-center justify-center shrink-0">
-                                <Zap className="h-5 w-5 text-white" />
-                              </div>
-                              <div>
-                                <p className="font-bold text-sm">Free Money</p>
-                                <p className="text-xs text-muted-foreground">Paiement mobile Free</p>
-                              </div>
-                            </div>
-                            {field.value === 'free_money' && <ShieldCheck className="h-5 w-5 text-green-500 shrink-0" />}
-                          </label>
-
-                          {/* Expresso */}
-                          <label className={`flex items-center gap-3 rounded-xl border-2 p-4 cursor-pointer transition-all ${field.value === 'expresso' ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'}`}>
-                            <RadioGroupItem value="expresso" className="shrink-0" />
-                            <div className="flex items-center gap-3 flex-1">
-                              <div className="w-10 h-10 rounded-full bg-red-600 flex items-center justify-center shrink-0">
-                                <Smartphone className="h-5 w-5 text-white" />
-                              </div>
-                              <div>
-                                <p className="font-bold text-sm">Expresso Money</p>
-                                <p className="text-xs text-muted-foreground">Paiement mobile Expresso</p>
-                              </div>
-                            </div>
-                            {field.value === 'expresso' && <ShieldCheck className="h-5 w-5 text-green-500 shrink-0" />}
-                          </label>
-
-                          {/* Cash */}
                           <label className={`flex items-center gap-3 rounded-xl border-2 p-4 cursor-pointer transition-all ${field.value === 'cash' ? 'border-secondary bg-secondary/5' : 'border-border hover:border-secondary/50'}`}>
                             <RadioGroupItem value="cash" className="shrink-0" />
                             <div className="flex items-center gap-3 flex-1">
@@ -330,7 +355,6 @@ export default function Checkout() {
                     </FormItem>
                   )} />
 
-                  {/* Diamanopay badge */}
                   {paymentMethod !== 'cash' && (
                     <div className="mt-4 bg-green-50 border border-green-200 text-green-800 p-3 rounded-lg flex items-center gap-2 text-xs">
                       <ShieldCheck className="h-4 w-4 shrink-0" />
@@ -366,7 +390,7 @@ export default function Checkout() {
                     <img src={item.productImageUrl} alt={item.productName} className="w-14 h-14 object-cover rounded-lg bg-white/10 shrink-0" />
                     <div className="flex-1 min-w-0">
                       <p className="font-bold text-sm line-clamp-1">{item.productName}</p>
-                      <p className="text-white/60 text-xs">Qté: {item.quantity}</p>
+                      <p className="text-white/60 text-xs">Qté: {item.quantity} × {item.unitPrice.toLocaleString()} F</p>
                     </div>
                     <span className="font-bold text-sm shrink-0">{(item.unitPrice * item.quantity).toLocaleString()} F</span>
                   </div>

@@ -273,6 +273,76 @@ paths:
                 items:
                   $ref: "#/components/schemas/DeliveryZone"
 
+  /admin/categories:
+    get:
+      operationId: adminListCategories
+      tags: [admin]
+      summary: List all categories (admin)
+      responses:
+        "200":
+          description: All categories
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Category"
+    post:
+      operationId: adminCreateCategory
+      tags: [admin]
+      summary: Create a category (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CategoryInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Category"
+
+  /admin/categories/{id}:
+    put:
+      operationId: adminUpdateCategory
+      tags: [admin]
+      summary: Update a category (admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CategoryInput"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Category"
+    delete:
+      operationId: adminDeleteCategory
+      tags: [admin]
+      summary: Delete a category (admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
   /admin/delivery-zones:
     get:
       operationId: adminListDeliveryZones
@@ -366,6 +436,20 @@ components:
           type: string
       required:
         - id
+        - name
+        - slug
+        - icon
+
+    CategoryInput:
+      type: object
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+        icon:
+          type: string
+      required:
         - name
         - slug
         - icon

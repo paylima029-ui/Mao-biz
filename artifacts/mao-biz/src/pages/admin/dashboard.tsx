@@ -1,7 +1,7 @@
 import { useGetAdminStats } from "@workspace/api-client-react";
 import { Link, useLocation } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Package, ShoppingCart, DollarSign, AlertTriangle, ListOrdered, LogOut, MapPin } from "lucide-react";
+import { Package, ShoppingCart, DollarSign, AlertTriangle, ListOrdered, LogOut, MapPin, Tag } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 
 export function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -42,6 +42,11 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
           <Link href="/admin/delivery-zones">
             <span className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-white/10 transition-colors cursor-pointer whitespace-nowrap font-medium">
               <MapPin className="h-5 w-5 text-primary" /> Zones de livraison
+            </span>
+          </Link>
+          <Link href="/admin/categories">
+            <span className="flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-white/10 transition-colors cursor-pointer whitespace-nowrap font-medium">
+              <Tag className="h-5 w-5 text-primary" /> Catégories
             </span>
           </Link>
           <Link href="/">

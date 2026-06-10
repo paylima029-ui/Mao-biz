@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "@workspace/db";
-import { ordersTable, productsTable, deliveryZonesTable } from "@workspace/db";
+import { ordersTable, productsTable, deliveryZonesTable, categoriesTable } from "@workspace/db";
 import { sql, gte, eq } from "drizzle-orm";
 import { z } from "zod";
 import { formatZone } from "./delivery-zones";
@@ -105,6 +105,43 @@ router.delete("/delivery-zones/:id", async (req, res) => {
   if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
 
   await db.delete(deliveryZonesTable).where(eq(deliveryZonesTable.id, id));
+  return res.status(204).send();
+});
+
+// ─── Categories Admin CRUD ──────────────────────────────────────────────────
+
+const categoryInputSchema = z.object({
+  name: z.string().min(1),
+  slug: z.string().min(1).regex(/^[a-z0-9-]+$/, "Slug: lettres minuscules, chiffres et tirets uniquement"),
+  icon: z.string().min(1),
+});
+
+router.get("/categories", async (_req, res) => {
+  const cats = await db.select().from(categoriesTable).orderBy(categoriesTable.id);
+  return res.json(cats);
+});
+
+router.post("/categories", async (req, res) => {
+  const parsed = categoryInputSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Données invalides", details: parsed.error.flatten() });
+  const [cat] = await db.insert(categoriesTable).values(parsed.data).returning();
+  return res.status(201).json(cat);
+});
+
+router.put("/categories/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: "ID invalide" });
+  const parsed = categoryInputSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Données invalides" });
+  const [cat] = await db.update(categoriesTable).set(parsed.data).where(eq(categoriesTable.id, id)).returning();
+  if (!cat) return res.status(404).json({ error: "Catégorie introuvable" });
+  return res.json(cat);
+});
+
+router.delete("/categories/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: "ID invalide" });
+  await db.delete(categoriesTable).where(eq(categoriesTable.id, id));
   return res.status(204).send();
 });
 
